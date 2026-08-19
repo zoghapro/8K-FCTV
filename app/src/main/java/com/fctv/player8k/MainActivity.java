@@ -3,6 +3,7 @@ package com.fctv.player8k;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -30,7 +31,7 @@ public class MainActivity extends Activity {
     private ListView list;
     private final List<Item> items = new ArrayList<>();
     private ArrayAdapter<String> adapter;
-    private String xtreamBase, xtreamUser, xtreamPass;
+    private String xtreamBase = "", xtreamUser = "", xtreamPass = "";
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
@@ -89,17 +90,20 @@ public class MainActivity extends Activity {
     }
 
     private void loginXtream() {
-        try {
-            xtreamBase=normalizeServer(server.getText().toString());
-            xtreamUser=username.getText().toString().trim();
-            xtreamPass=password.getText().toString().trim();
-        } catch(Throwable t) {
-            status.setText("Invalid server address."); return;
-        }
-        if(xtreamBase.isEmpty()||xtreamUser.isEmpty()||xtreamPass.isEmpty()){
+        String base;
+        try { base=normalizeServer(server.getText().toString()); }
+        catch(Throwable t){ status.setText("Invalid server address."); return; }
+        String user=username.getText().toString().trim();
+        String pass=password.getText().toString().trim();
+        if(base.isEmpty()||user.isEmpty()||pass.isEmpty()){
             status.setText("Enter server, username and password."); return;
         }
-        status.setText("Connecting…");
+        connectXtream(base,user,pass,false,null);
+    }
+
+    private void connectXtream(String base,String user,String pass,boolean fromM3u,String fallbackM3u) {
+        xtreamBase=base; xtreamUser=user; xtreamPass=pass;
+        status.setText(fromM3u?"Xtream-style M3U detected. Connecting…":"Connecting…");
         new Thread(()->{
             try {
                 String api=xtreamBase+"/player_api.php?username="+enc(xtreamUser)+"&password="+enc(xtreamPass);
@@ -111,14 +115,19 @@ public class MainActivity extends Activity {
                 String st=ui.optString("status","");
                 boolean ok="1".equals(auth) || "Active".equalsIgnoreCase(st);
                 if(!ok) throw new Exception(st.isEmpty()?"Login rejected by server":"Account status: "+st);
-                runOnUiThread(this::showXtreamHome);
+                runOnUiThread(()->showXtreamHome(fromM3u?"M3U connected through Xtream API":"Connected"));
             } catch(Throwable e){
-                runOnUiThread(()->status.setText("Login failed: "+friendly(e)));
+                if(fromM3u && fallbackM3u!=null){
+                    runOnUiThread(()->status.setText("Xtream fallback failed. Trying direct M3U…"));
+                    loadDirectM3u(fallbackM3u,"Xtream API: "+friendly(e));
+                } else {
+                    runOnUiThread(()->status.setText("Login failed: "+friendly(e)));
+                }
             }
         }).start();
     }
 
-    private void showXtreamHome() {
+    private void showXtreamHome(String message) {
         base();
         topBar=new LinearLayout(this); topBar.setOrientation(LinearLayout.HORIZONTAL); root.addView(topBar);
         Button live=button("LIVE TV"); Button movies=button("MOVIES"); Button series=button("SERIES"); Button logout=button("LOGOUT");
@@ -126,7 +135,7 @@ public class MainActivity extends Activity {
         topBar.addView(movies,new LinearLayout.LayoutParams(0,-2,1));
         topBar.addView(series,new LinearLayout.LayoutParams(0,-2,1));
         topBar.addView(logout,new LinearLayout.LayoutParams(0,-2,1));
-        status=text("Choose a section",14,Color.LTGRAY); root.addView(status);
+        status=text(message,14,Color.LTGRAY); root.addView(status);
         list=new ListView(this); list.setBackgroundColor(Color.BLACK); list.setDividerHeight(1);
         root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
         live.setOnClickListener(v->loadXtream("get_live_streams","live"));
@@ -152,7 +161,8 @@ public class MainActivity extends Activity {
                     JSONObject o=a.optJSONObject(i); if(o==null) continue;
                     String name=o.optString("name",o.optString("title","Untitled"));
                     if(type.equals("series")){
-                        loaded.add(new Item(name,"",type,o.optInt("series_id",0),o.optString("cover","")));
+                        int sid=o.optInt("series_id",0); if(sid<=0) continue;
+                        loaded.add(new Item(name,"",type,sid,o.optString("cover","")));
                     } else {
                         int id=o.optInt("stream_id",0); if(id<=0) continue;
                         String ext=o.optString("container_extension", type.equals("movie")?"mp4":"ts");
@@ -162,7 +172,7 @@ public class MainActivity extends Activity {
                         loaded.add(new Item(name,url,type,id,o.optString("stream_icon",o.optString("cover",""))));
                     }
                 }
-                runOnUiThread(()->display(loaded,type.toUpperCase()));
+                runOnUiThread(()->display(loaded,type.equals("live")?"LIVE TV":type.equals("movie")?"MOVIES":"SERIES"));
             }catch(Throwable e){
                 runOnUiThread(()->{ if(status!=null) status.setText("Could not load: "+friendly(e)); });
             }
@@ -187,6 +197,7 @@ public class MainActivity extends Activity {
                 } else if(episodesObj instanceof JSONArray){
                     addEpisodes((JSONArray)episodesObj,"",loaded);
                 }
+                if(loaded.isEmpty()) throw new Exception("No episodes returned by server");
                 runOnUiThread(()->display(loaded,series.name+" • EPISODES"));
             }catch(Throwable e){
                 runOnUiThread(()->status.setText("Could not load episodes: "+friendly(e)));
@@ -199,8 +210,8 @@ public class MainActivity extends Activity {
             JSONObject o=arr.optJSONObject(i); if(o==null) continue;
             int id=o.optInt("id",o.optInt("stream_id",0)); if(id<=0) continue;
             String ext=o.optString("container_extension","mp4"); if(ext.isEmpty()) ext="mp4";
-            String title=o.optString("title",o.optString("name","Episode "+(i+1)));
             String ep=o.optString("episode_num","");
+            String title=o.optString("title",o.optString("name","Episode "+(i+1)));
             String prefix=season.isEmpty()?"":"S"+season+(ep.isEmpty()?"":" E"+ep)+" • ";
             String direct=o.optString("direct_source","").trim();
             String url=!direct.isEmpty()?direct:xtreamBase+"/series/"+path(xtreamUser)+"/"+path(xtreamPass)+"/"+id+"."+ext;
@@ -212,7 +223,17 @@ public class MainActivity extends Activity {
         String raw=m3uUrl.getText().toString().trim();
         if(raw.isEmpty()){status.setText("Enter an M3U URL.");return;}
         final String playlistUrl=normalizeUrl(raw);
-        status.setText("Loading playlist…");
+
+        XtreamLink link=parseXtreamM3u(playlistUrl);
+        if(link!=null){
+            connectXtream(link.base,link.user,link.pass,true,playlistUrl);
+            return;
+        }
+        loadDirectM3u(playlistUrl,null);
+    }
+
+    private void loadDirectM3u(String playlistUrl,String previousError){
+        runOnUiThread(()->{ if(status!=null) status.setText("Loading playlist…"); });
         new Thread(()->{
             try{
                 String data=get(playlistUrl);
@@ -244,9 +265,24 @@ public class MainActivity extends Activity {
                     display(loaded,"M3U");
                 });
             }catch(Throwable e){
-                runOnUiThread(()->status.setText("Could not load M3U: "+friendly(e)));
+                final String msg=(previousError==null?"":previousError+" • ")+friendly(e);
+                runOnUiThread(()->status.setText("Could not load M3U: "+msg));
             }
         }).start();
+    }
+
+    private XtreamLink parseXtreamM3u(String url){
+        try{
+            Uri u=Uri.parse(url);
+            String p=u.getPath();
+            if(p==null || !p.toLowerCase().endsWith("/get.php")) return null;
+            String user=u.getQueryParameter("username");
+            String pass=u.getQueryParameter("password");
+            if(user==null||pass==null||user.isEmpty()||pass.isEmpty()) return null;
+            String scheme=u.getScheme(); String authority=u.getEncodedAuthority();
+            if(scheme==null||authority==null) return null;
+            return new XtreamLink(scheme+"://"+authority,user,pass);
+        }catch(Throwable ignored){ return null; }
     }
 
     private void display(List<Item> loaded,String label){
@@ -274,9 +310,11 @@ public class MainActivity extends Activity {
         String current=normalizeUrl(u);
         for(int redirects=0; redirects<6; redirects++){
             HttpURLConnection c=(HttpURLConnection)new URL(current).openConnection();
-            c.setInstanceFollowRedirects(false); c.setConnectTimeout(20000); c.setReadTimeout(45000);
-            c.setRequestProperty("User-Agent","8K-FCTV/1.1 (Android)");
+            c.setInstanceFollowRedirects(false); c.setConnectTimeout(20000); c.setReadTimeout(45000); c.setUseCaches(false);
+            c.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 8K-FCTV/1.2");
             c.setRequestProperty("Accept","*/*");
+            c.setRequestProperty("Accept-Encoding","identity");
+            c.setRequestProperty("Connection","close");
             int code=c.getResponseCode();
             if(code>=300 && code<400){
                 String loc=c.getHeaderField("Location"); c.disconnect();
@@ -302,27 +340,46 @@ public class MainActivity extends Activity {
     private String normalizeServer(String s){
         s=s==null?"":s.trim(); if(s.isEmpty()) return "";
         if(!s.matches("(?i)^https?://.*")) s="http://"+s;
+        try{
+            Uri u=Uri.parse(s);
+            if(u.getScheme()!=null && u.getEncodedAuthority()!=null && (s.contains("/get.php")||s.contains("/player_api.php"))){
+                s=u.getScheme()+"://"+u.getEncodedAuthority();
+            }
+        }catch(Throwable ignored){}
         while(s.endsWith("/")) s=s.substring(0,s.length()-1);
         return s;
     }
+
     private String normalizeUrl(String s){
         s=s==null?"":s.trim();
         if(!s.matches("(?i)^https?://.*")) s="http://"+s;
         return s;
     }
+
     private String enc(String s)throws Exception { return URLEncoder.encode(s,"UTF-8"); }
     private String path(String s){ try{return enc(s).replace("+","%20");}catch(Exception e){return s;} }
+
     private String attr(String l,String k){
         String q=k+"=\""; int a=l.indexOf(q); if(a<0)return""; a+=q.length(); int b=l.indexOf('"',a); return b>a?l.substring(a,b):"";
     }
+
     private String friendly(Throwable e){
         String m=e.getMessage(); if(m==null||m.trim().isEmpty()) m=e.getClass().getSimpleName();
-        return m.length()>180?m.substring(0,180):m;
+        return m.length()>220?m.substring(0,220):m;
     }
-    private String shortText(String s){ s=s.replace('\n',' ').replace('\r',' ').trim(); return s.length()>100?s.substring(0,100):s; }
+
+    private String shortText(String s){
+        s=s.replace('\n',' ').replace('\r',' ').replaceAll("<[^>]+>"," ").replaceAll("\\s+"," ").trim();
+        return s.length()>100?s.substring(0,100):s;
+    }
 
     static class Item{
         String name,url,type,icon; int id;
         Item(String n,String u,String t,int i,String ic){name=n;url=u;type=t;id=i;icon=ic;}
+    }
+
+    static class XtreamLink{
+        String base,user,pass;
+        XtreamLink(String b,String u,String p){base=b;user=u;pass=p;}
     }
 }
