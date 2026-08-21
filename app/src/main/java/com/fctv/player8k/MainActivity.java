@@ -19,10 +19,12 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 public class MainActivity extends Activity {
-    private static final int GOLD = Color.rgb(212,175,55);
+    // Professional green/blue aesthetic
+    private static final int BRAND_COLOR = Color.rgb(0, 200, 150); 
     private LinearLayout root, form, topBar;
     private EditText server, username, password, m3uUrl;
     private TextView status, title;
@@ -46,12 +48,14 @@ public class MainActivity extends Activity {
     }
 
     private Button button(String s) {
-        Button b = new Button(this); b.setText(s); b.setTextColor(Color.BLACK); b.setBackgroundColor(GOLD); b.setFocusable(true); return b;
+        Button b = new Button(this); b.setText(s); b.setTextColor(Color.WHITE); b.setBackgroundColor(BRAND_COLOR); b.setFocusable(true); return b;
     }
 
     private void base() {
-        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(28,24,28,24); root.setBackgroundColor(Color.rgb(8,8,8)); setContentView(root);
-        title = text("8K FCTV", 28, GOLD); title.setGravity(Gravity.CENTER_HORIZONTAL); root.addView(title);
+        root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(28,24,28,24); 
+        root.setBackgroundColor(Color.rgb(8,12,16)); // Dark blue/black background
+        setContentView(root);
+        title = text("8K FCTV", 28, BRAND_COLOR); title.setGravity(Gravity.CENTER_HORIZONTAL); root.addView(title);
     }
 
     private void showLogin() {
@@ -59,13 +63,13 @@ public class MainActivity extends Activity {
         root.addView(text("Your IPTV Player",18,Color.LTGRAY));
         form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); root.addView(form,new LinearLayout.LayoutParams(-1,0,1));
 
-        TextView xt = text("XTREAM CODES",17,GOLD); form.addView(xt);
+        TextView xt = text("XTREAM CODES",17,BRAND_COLOR); form.addView(xt);
         server=input("Server URL  http://example.com:8080"); username=input("Username"); password=input("Password"); password.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
         form.addView(server); form.addView(username); form.addView(password);
         Button xLogin=button("LOGIN WITH XTREAM CODES"); form.addView(xLogin); xLogin.setOnClickListener(v->loginXtream());
 
         form.addView(text("OR",16,Color.GRAY));
-        form.addView(text("M3U PLAYLIST",17,GOLD)); m3uUrl=input("M3U URL"); form.addView(m3uUrl);
+        form.addView(text("M3U PLAYLIST",17,BRAND_COLOR)); m3uUrl=input("M3U URL"); form.addView(m3uUrl);
         Button mLogin=button("LOAD M3U PLAYLIST"); form.addView(mLogin); mLogin.setOnClickListener(v->loadM3u());
         status=text("",14,Color.LTGRAY); form.addView(status);
     }
@@ -73,7 +77,7 @@ public class MainActivity extends Activity {
     private void loginXtream() {
         xtreamBase=normalize(server.getText().toString()); xtreamUser=username.getText().toString().trim(); xtreamPass=password.getText().toString().trim();
         if(xtreamBase.isEmpty()||xtreamUser.isEmpty()||xtreamPass.isEmpty()){ status.setText("Enter server, username and password."); return; }
-        status.setText("Connecting…");
+        status.setText("Connecting...");
         new Thread(()->{
             try {
                 String api=xtreamBase+"/player_api.php?username="+enc(xtreamUser)+"&password="+enc(xtreamPass);
@@ -90,13 +94,13 @@ public class MainActivity extends Activity {
         Button live=button("LIVE TV"); Button movies=button("MOVIES"); Button series=button("SERIES"); Button logout=button("LOGOUT");
         topBar.addView(live,new LinearLayout.LayoutParams(0,-2,1)); topBar.addView(movies,new LinearLayout.LayoutParams(0,-2,1)); topBar.addView(series,new LinearLayout.LayoutParams(0,-2,1)); topBar.addView(logout,new LinearLayout.LayoutParams(0,-2,1));
         status=text("Choose a section",14,Color.LTGRAY); root.addView(status);
-        list=new ListView(this); list.setBackgroundColor(Color.BLACK); list.setDividerHeight(1); root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
+        list=new ListView(this); list.setBackgroundColor(Color.TRANSPARENT); list.setDividerHeight(2); root.addView(list,new LinearLayout.LayoutParams(-1,0,1));
         live.setOnClickListener(v->loadXtream("get_live_streams","live")); movies.setOnClickListener(v->loadXtream("get_vod_streams","movie")); series.setOnClickListener(v->loadXtream("get_series","series")); logout.setOnClickListener(v->showLogin());
         loadXtream("get_live_streams","live");
     }
 
     private void loadXtream(String action,String type){
-        status.setText("Loading…");
+        status.setText("Loading...");
         new Thread(()->{
             try{
                 String api=xtreamBase+"/player_api.php?username="+enc(xtreamUser)+"&password="+enc(xtreamPass)+"&action="+action;
@@ -115,8 +119,42 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    // Fetches episodes when a series is clicked
+    private void loadSeriesInfo(int seriesId, String seriesName) {
+        status.setText("Loading Episodes...");
+        new Thread(() -> {
+            try {
+                String api = xtreamBase + "/player_api.php?username=" + enc(xtreamUser) + "&password=" + enc(xtreamPass) + "&action=get_series_info&series_id=" + seriesId;
+                JSONObject resp = new JSONObject(get(api));
+                JSONObject episodes = resp.optJSONObject("episodes");
+                List<Item> loaded = new ArrayList<>();
+                
+                if (episodes != null) {
+                    Iterator<String> keys = episodes.keys();
+                    while (keys.hasNext()) {
+                        String seasonNum = keys.next();
+                        JSONArray eps = episodes.optJSONArray(seasonNum);
+                        if (eps != null) {
+                            for (int i = 0; i < eps.length(); i++) {
+                                JSONObject ep = eps.getJSONObject(i);
+                                String epTitle = ep.optString("title", "Episode " + ep.optString("episode_num"));
+                                String ext = ep.optString("container_extension", "mp4");
+                                int epId = ep.optInt("id", 0);
+                                String url = xtreamBase + "/series/" + enc(xtreamUser) + "/" + enc(xtreamPass) + "/" + epId + "." + ext;
+                                loaded.add(new Item("S" + seasonNum + " E" + ep.optString("episode_num") + " - " + epTitle, url, "video", epId, ""));
+                            }
+                        }
+                    }
+                }
+                runOnUiThread(() -> display(loaded, seriesName + " Episodes"));
+            } catch (Exception e) {
+                runOnUiThread(() -> status.setText("Could not load episodes: " + e.getMessage()));
+            }
+        }).start();
+    }
+
     private void loadM3u(){
-        String url=m3uUrl.getText().toString().trim(); if(url.isEmpty()){status.setText("Enter an M3U URL.");return;} status.setText("Loading playlist…");
+        String url=m3uUrl.getText().toString().trim(); if(url.isEmpty()){status.setText("Enter an M3U URL.");return;} status.setText("Loading playlist...");
         new Thread(()->{
             try{
                 String data=get(url); String[] lines=data.replace("\r","").split("\n"); List<Item> loaded=new ArrayList<>(); String name=null,group="";
@@ -130,9 +168,16 @@ public class MainActivity extends Activity {
 
     private void display(List<Item> loaded,String label){
         items.clear(); items.addAll(loaded); List<String> names=new ArrayList<>(); for(Item i:items) names.add(i.name);
-        adapter=new ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,names){ @Override public View getView(int p,View c,android.view.ViewGroup g){ TextView v=(TextView)super.getView(p,c,g); v.setTextColor(Color.WHITE); v.setTextSize(17); v.setPadding(20,18,20,18); v.setBackgroundColor(Color.rgb(16,16,16)); return v; }};
+        adapter=new ArrayAdapter<String>(this,android.R.layout.simple_list_item_1,names){ @Override public View getView(int p,View c,android.view.ViewGroup g){ TextView v=(TextView)super.getView(p,c,g); v.setTextColor(Color.WHITE); v.setTextSize(17); v.setPadding(20,18,20,18); v.setBackgroundColor(Color.rgb(16,24,32)); return v; }};
         list.setAdapter(adapter); status.setText(label+" • "+items.size()+" items");
-        list.setOnItemClickListener((a,v,p,id)->{ Item it=items.get(p); if(it.type.equals("series")){ Toast.makeText(this,"Series episode browser will be added in the next build.",Toast.LENGTH_LONG).show(); } else play(it.url,it.name); });
+        list.setOnItemClickListener((a,v,p,id)->{ 
+            Item it=items.get(p); 
+            if(it.type.equals("series")){ 
+                loadSeriesInfo(it.id, it.name); 
+            } else {
+                play(it.url,it.name); 
+            }
+        });
     }
 
     private void play(String url,String name){ Intent i=new Intent(this,PlayerActivity.class); i.putExtra("url",url); i.putExtra("name",name); startActivity(i); }
