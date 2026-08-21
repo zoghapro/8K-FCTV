@@ -181,7 +181,31 @@ public class MainActivity extends Activity {
     }
 
     private void play(String url,String name){ Intent i=new Intent(this,PlayerActivity.class); i.putExtra("url",url); i.putExtra("name",name); startActivity(i); }
-    private String get(String u)throws Exception{ HttpURLConnection c=(HttpURLConnection)new URL(u).openConnection(); c.setConnectTimeout(15000); c.setReadTimeout(30000); c.setRequestProperty("User-Agent","8K-FCTV/1.0"); BufferedReader r=new BufferedReader(new InputStreamReader(c.getInputStream())); StringBuilder b=new StringBuilder(); String l; while((l=r.readLine())!=null)b.append(l).append('\n'); r.close(); return b.toString(); }
+    
+    // UPDATED NETWORK METHOD
+    private String get(String u) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+        c.setConnectTimeout(15000);
+        c.setReadTimeout(30000);
+        
+        // Mask the app as a standard IPTV player to bypass server blocks
+        c.setRequestProperty("User-Agent", "IPTVSmartersPro");
+        c.setInstanceFollowRedirects(true); // Automatically follow redirects
+
+        // Catch the actual server error code (e.g., 404 Not Found or 401 Unauthorized)
+        int responseCode = c.getResponseCode();
+        if (responseCode >= 400) {
+            throw new Exception("Server rejected connection (HTTP " + responseCode + "). Check your URL.");
+        }
+
+        BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream()));
+        StringBuilder b = new StringBuilder();
+        String l;
+        while ((l = r.readLine()) != null) b.append(l).append('\n');
+        r.close();
+        return b.toString();
+    }
+
     private String normalize(String s){ s=s.trim(); while(s.endsWith("/"))s=s.substring(0,s.length()-1); return s; }
     private String enc(String s){ return URLEncoder.encode(s, StandardCharsets.UTF_8); }
     private String attr(String l,String k){ String q=k+"=\""; int a=l.indexOf(q); if(a<0)return""; a+=q.length(); int b=l.indexOf('"',a); return b>a?l.substring(a,b):""; }
