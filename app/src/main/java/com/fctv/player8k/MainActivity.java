@@ -17,7 +17,6 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -119,7 +118,6 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    // Fetches episodes when a series is clicked
     private void loadSeriesInfo(int seriesId, String seriesName) {
         status.setText("Loading Episodes...");
         new Thread(() -> {
@@ -182,22 +180,16 @@ public class MainActivity extends Activity {
 
     private void play(String url,String name){ Intent i=new Intent(this,PlayerActivity.class); i.putExtra("url",url); i.putExtra("name",name); startActivity(i); }
     
-    // UPDATED NETWORK METHOD
     private String get(String u) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
         c.setConnectTimeout(15000);
         c.setReadTimeout(30000);
-        
-        // Mask the app as a standard IPTV player to bypass server blocks
         c.setRequestProperty("User-Agent", "IPTVSmartersPro");
-        c.setInstanceFollowRedirects(true); // Automatically follow redirects
-
-        // Catch the actual server error code (e.g., 404 Not Found or 401 Unauthorized)
+        c.setInstanceFollowRedirects(true);
         int responseCode = c.getResponseCode();
         if (responseCode >= 400) {
             throw new Exception("Server rejected connection (HTTP " + responseCode + "). Check your URL.");
         }
-
         BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream()));
         StringBuilder b = new StringBuilder();
         String l;
@@ -207,7 +199,16 @@ public class MainActivity extends Activity {
     }
 
     private String normalize(String s){ s=s.trim(); while(s.endsWith("/"))s=s.substring(0,s.length()-1); return s; }
-    private String enc(String s){ return URLEncoder.encode(s, StandardCharsets.UTF_8); }
+    
+    // THE FIX IS HERE: Backwards compatible text encoding
+    private String enc(String s){ 
+        try {
+            return URLEncoder.encode(s, "UTF-8"); 
+        } catch (Exception e) {
+            return s;
+        }
+    }
+    
     private String attr(String l,String k){ String q=k+"=\""; int a=l.indexOf(q); if(a<0)return""; a+=q.length(); int b=l.indexOf('"',a); return b>a?l.substring(a,b):""; }
     static class Item{ String name,url,type,icon; int id; Item(String n,String u,String t,int i,String ic){name=n;url=u;type=t;id=i;icon=ic;} }
 }
